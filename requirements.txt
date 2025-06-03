@@ -1,0 +1,7 @@
+Flask
+torch
+gdown
+transformers
+scikit-learn
+pandas
+nltk

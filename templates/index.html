@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multi-Task Text Classification App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+<div class="container">
+    <h1 class="text-center">Multi-Task Text Classification</h1>
+
+    <form id="classificationForm" enctype="multipart/form-data" class="mb-4" novalidate>
+        <div class="mb-3">
+            <label for="taskSelect" class="form-label">Select Task</label>
+            <select id="taskSelect" name="task" class="form-select" required>
+                <option value="" disabled selected>Choose a task</option>
+                {% for task, models in tasks.items() %}
+                    <option value="{{ task }}">{{ task.replace('_', ' ').title() }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label for="modelSelect" class="form-label">Select Model</label>
+            <select id="modelSelect" name="model" class="form-select" required disabled>
+                <option value="" disabled selected>Select a task first</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label for="textInput" class="form-label">Enter Text</label>
+            <textarea id="textInput" name="text_input" class="form-control" rows="4" placeholder="Type or paste your text here" minlength="5"></textarea>
+            <div id="wordCount" class="word-count">Words: 0</div>
+        </div>
+
+        <div class="mb-3">
+            <label for="fileInput" class="form-label">Or Upload File (TXT or CSV)</label>
+            <input id="fileInput" name="file" type="file" class="form-control" accept=".txt,.csv" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
+            <span id="btnText">Classify</span>
+            <span id="btnSpinner" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display:none;"></span>
+        </button>
+    </form>
+
+    <div id="alertContainer" class="mb-4"></div>
+
+    <div id="resultsSection" class="mt-4" style="display:none;">
+        <h3 class="section-title">Classification Results</h3>
+        <div class="row">
+            <div class="col-12 col-lg-6">
+                <table class="table table-hover" id="resultsTable">
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Text</th>
+                            <th scope="col">Predicted Label</th>
+                            <th scope="col">Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div id="downloadSection" style="display:none;">
+                    <a id="csvDownload" class="btn btn-outline-success btn-sm mt-2" href="#">Download Results (CSV)</a>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <div id="chartSection" style="display:none;">
+                    <h5 class="chart-title">Confidence Visualization</h5>
+                    <img id="chartImage" class="chart-img" src="" alt="Confidence Chart" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const taskSelect = document.getElementById('taskSelect');
+    const modelSelect = document.getElementById('modelSelect');
+    const textInput = document.getElementById('textInput');
+    const fileInput = document.getElementById('fileInput');
+    const form = document.getElementById('classificationForm');
+    const resultsSection = document.getElementById('resultsSection');
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    const alertContainer = document.getElementById('alertContainer');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = document.getElementById('btnText');
+    const btnSpinner = document.getElementById('btnSpinner');
+    const wordCount = document.getElementById('wordCount');
+    const csvDownload = document.getElementById('csvDownload');
+    const chartSection = document.getElementById('chartSection');
+    const chartImage = document.getElementById('chartImage');
+    const downloadSection = document.getElementById('downloadSection');
+
+    function showAlert(message, type='danger') {
+        alertContainer.innerHTML = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `;
+    }
+
+    // Enable submit only when task, model selected and text or file present
+    function validateForm() {
+        const taskOk = taskSelect.value !== "";
+        const modelOk = modelSelect.value !== "";
+        const textOk = textInput.value.trim().split(/\s+/).filter(w => w.length > 0).length >= 5;
+        const fileOk = fileInput.files.length > 0;
+        submitBtn.disabled = !(taskOk && modelOk && (textOk || fileOk));
+    }
+
+    // Load models for selected task via API
+    taskSelect.addEventListener('change', async () => {
+        modelSelect.innerHTML = '<option value="" disabled selected>Loading models...</option>';
+        modelSelect.disabled = true;
+        resultsSection.style.display = 'none';
+        alertContainer.innerHTML = '';
+        chartSection.style.display = 'none';
+        downloadSection.style.display = 'none';
+        try {
+            const res = await fetch('/models', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task: taskSelect.value})
+            });
+            const models = await res.json();
+            if (models.length > 0) {
+                modelSelect.innerHTML = '<option value="" disabled selected>Choose a model</option>';
+                models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    modelSelect.appendChild(opt);
+                });
+                modelSelect.disabled = false;
+            } else {
+                modelSelect.innerHTML = '<option value="" disabled>No models available</option>';
+                modelSelect.disabled = true;
+            }
+        } catch (err) {
+            modelSelect.innerHTML = '<option value="" disabled>Error loading models</option>';
+            modelSelect.disabled = true;
+            showAlert('Error loading models. Please try again.');
+        }
+        validateForm();
+    });
+
+    modelSelect.addEventListener('change', () => {
+        validateForm();
+    });
+
+    textInput.addEventListener('input', () => {
+        const words = textInput.value.trim().split(/\s+/).filter(w => w.length > 0).length;
+        wordCount.textContent = `Words: ${words}`;
+        if (words > 0 && words < 5) {
+            textInput.setCustomValidity('Please enter at least 5 words.');
+        } else {
+            textInput.setCustomValidity('');
+        }
+        validateForm();
+    });
+
+    fileInput.addEventListener('change', () => {
+        validateForm();
+    });
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        alertContainer.innerHTML = '';
+        resultsSection.style.display = 'none';
+        chartSection.style.display = 'none';
+        downloadSection.style.display = 'none';
+        submitBtn.disabled = true;
+        btnText.style.display = 'none';
+        btnSpinner.style.display = 'inline-block';
+
+        const formData = new FormData(form);
+
+        try {
+            const res = await fetch('/predict', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                showAlert(data.error || 'Unknown error');
+            } else {
+                resultsTableBody.innerHTML = '';
+                data.results.forEach(item => {
+                    const confidence = (item.confidence * 100).toFixed(2);
+                    let confidenceClass = '';
+                    if (confidence >= 80) confidenceClass = 'confidence-high';
+                    else if (confidence >= 50) confidenceClass = 'confidence-medium';
+                    else confidenceClass = 'confidence-low';
+                    
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${item.text}</td>
+                        <td>${item.label}</td>
+                        <td class="${confidenceClass}">${confidence}%</td>
+                    `;
+                    resultsTableBody.appendChild(tr);
+                });
+                resultsSection.style.display = 'block';
+                
+                // Display chart and CSV download
+                if (data.chart_url) {
+                    chartImage.src = data.chart_url + '?' + new Date().getTime(); // Prevent caching
+                    chartSection.style.display = 'block';
+                }
+                if (data.csv_url) {
+                    csvDownload.href = data.csv_url;
+                    downloadSection.style.display = 'block';
+                }
+            }
+        } catch (error) {
+            showAlert('Failed to fetch prediction. Please try again.');
+        } finally {
+            submitBtn.disabled = false;
+            btnText.style.display = 'inline';
+            btnSpinner.style.display = 'none';
+        }
+    });
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
