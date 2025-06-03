@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: text-classification-app
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: MODEL_DOWNLOAD
+        value: "true" 
+    autoDeploy: true
